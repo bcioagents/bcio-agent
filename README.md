@@ -22,7 +22,7 @@ npx bcio-agent                    # nine assets, 24 h and 7 d move, Wall Street 
 npx bcio-agent corr NVDA BTC      # correlation of hourly returns and the lag between them
 npx bcio-agent matrix             # 9 × 9 correlation matrix
 npx bcio-agent shield             # crypto moving while Wall Street is closed?
-npx bcio-agent wallet 0x…         # a wallet on the BCIO testnet desk + the agent's on-chain limits
+npx bcio-agent wallet 0x…         # a wallet on Robinhood Chain + the BCIO agent's on-chain limits
 npx bcio-agent --help
 ```
 
@@ -62,26 +62,27 @@ Then ask things like *"Does BTC follow NVDA? Find the lag."* or *"Wall Street is
 | `correlate` | Same-hour correlation of hourly log returns, and the lag (−12 h to +12 h) where two assets line up best |
 | `correlation_matrix` | Correlation matrix of all nine assets |
 | `weekend_shield` | Crypto moves past a threshold while Wall Street is closed, plus the stock tokens that can follow |
-| `get_wallet` | Test-token positions on the BCIO desk (Robinhood Chain testnet) and the agent's trading limits for that wallet |
+| `get_wallet` | Positions on Robinhood Chain mainnet (USDG, NVDA, TSLA, QQQ, WETH) at Chainlink prices, and the BCIO agent's trading limits for that wallet |
 
 ## How it reads
 
 1. **Prices.** CoinGecko public API. Robinhood stock tokens are listed there as tokenized stocks, so their prices keep moving on weekends. Requests are spaced out and retried when the free API is busy; set `COINGECKO_API_KEY` (a free demo key) for faster calls.
 2. **Correlation.** Hourly prices are aligned by the hour and turned into log returns. Pearson correlation at lag 0, then a scan from −12 h to +12 h. A positive best lag means the second asset tends to move after the first.
 3. **Market hours.** NYSE regular session 09:30–16:00 New York time, plus pre-market and after-hours.
-4. **Wallet.** Plain JSON-RPC reads on Robinhood Chain testnet (chain id 46630): token balances and the desk oracle price, and the agent policy (max per trade, max per day, expiry) that the user set on-chain.
+4. **Wallet.** Plain JSON-RPC reads on Robinhood Chain mainnet (chain id 4663): token balances, Chainlink USD prices, and the agent policy (tokens, max per trade, max per day, max price gap, expiry) the user set in the BCIO agent contract. The contract address is read from bcio.trade/api/chain.
 
 | Setting | Default |
 |---|---|
 | `COINGECKO_API_KEY` | none (free public API) |
-| `BCIO_RPC` | `https://rpc.testnet.chain.robinhood.com` |
+| `BCIO_RPC` | `https://rpc.mainnet.chain.robinhood.com` |
+| `BCIO_API` | `https://bcio.trade` |
 | `NO_COLOR` | colors on in a terminal |
 
-BCIO testnet desk: [`0xDBc2E0e894fbeddaA69f3Cd7C8d8d92125D0F79a`](https://explorer.testnet.chain.robinhood.com/address/0xDBc2E0e894fbeddaA69f3Cd7C8d8d92125D0F79a)
+Explorer: [robinhoodchain.blockscout.com](https://robinhoodchain.blockscout.com)
 
 ## Honest limits
 
-Correlations describe the past, not the future. US exchange holidays are not counted. Stock tokens are not shares. The wallet view covers the BCIO testnet desk and its test tokens only. Data, not financial advice. Not affiliated with Robinhood, CoinGecko or any listed company.
+Correlations describe the past, not the future. US exchange holidays are not counted. Stock tokens are not shares. The wallet view covers USDG, NVDA, TSLA, QQQ and WETH on Robinhood Chain. Robinhood stock tokens are not offered to US persons and are restricted in some other countries. Data, not financial advice. Not affiliated with Robinhood, CoinGecko or any listed company.
 
 ## License
 

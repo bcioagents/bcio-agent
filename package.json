@@ -1,7 +1,7 @@
 {
   "name": "bcio-agent",
-  "version": "1.0.0",
-  "description": "BCIO in your terminal and in Claude: Robinhood stock tokens (NVDA, TSLA, QQQ) and crypto read together. Quotes, correlation and lag, the weekend shield check, testnet wallets, and an MCP server. Read-only.",
+  "version": "1.1.0",
+  "description": "BCIO in your terminal and in Claude: Robinhood stock tokens (NVDA, TSLA, QQQ) and crypto read together. Quotes, correlation and lag, the weekend shield check, Robinhood Chain wallets, and an MCP server. Read-only.",
   "type": "module",
   "bin": { "bcio": "bin/bcio.mjs" },
   "files": ["bin", "README.md", "LICENSE"],

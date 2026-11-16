@@ -1,20 +1,22 @@
 #!/usr/bin/env node
 // bcio: the BCIO cross-asset engine in your shell. Stock tokens (NVDA, TSLA, QQQ) and crypto
 // (BTC, ETH, SOL, AI coins) read together: quotes, correlation and lag, the weekend shield check,
-// a wallet on the BCIO testnet desk, and an MCP server for Claude. Read-only: no keys, no signing.
-// Market data: CoinGecko public API. Chain: Robinhood Chain testnet (46630).
-const VERSION = "1.0.0";
+// a wallet on Robinhood Chain mainnet, and an MCP server for Claude. Read-only: no keys, no signing.
+// Market data: CoinGecko public API. Chain: Robinhood Chain mainnet (4663), Chainlink prices.
+const VERSION = "1.1.0";
 const SITE = "https://github.com/bcioagents/bcio-agent";
 const CG = "https://api.coingecko.com/api/v3";
-const RPC = process.env.BCIO_RPC || "https://rpc.testnet.chain.robinhood.com";
-const EXPLORER = "https://explorer.testnet.chain.robinhood.com";
-const DESK = "0xDBc2E0e894fbeddaA69f3Cd7C8d8d92125D0F79a";
-const KEEPER = "0x55D9b79e395a48D972baf4A8a1eb085e931F141b";
+const RPC = process.env.BCIO_RPC || "https://rpc.mainnet.chain.robinhood.com";
+const EXPLORER = "https://robinhoodchain.blockscout.com";
+const BCIO_API = process.env.BCIO_API || "https://bcio.trade";
+// Robinhood Chain mainnet: [token, decimals, Chainlink USD feed]. Sources: api.robinhood.com/rhj/assets,
+// docs.robinhood.com/chain, feeds verified on-chain by description().
 const TOKENS = {
-  USDC: ["0x0601eB6cEB7c2aBC83175bA41196167390f1e1f6", 6], NVDA: ["0xD1eFf98C33C8A77435BA0aa5BDd0Bc8987a1A8D6", 18],
-  TSLA: ["0x317217c021d2F49eAE06CC38E1594EfceaC07E79", 18], QQQ: ["0xCF94CF86D279fA589397d2BD365F1d160bD68CB1", 18],
-  BTC: ["0x12079b3Ec572b91aaC6D00b34cB853eaf80E1545", 18], ETH: ["0x125E3012F3EAEBa914EddfCfCf9f45fCF35889B9", 18],
-  SOL: ["0x13DEa58985234770781b972d6483500F7a847AEd", 18],
+  USDG: ["0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", 6, "0x61B7e5650328764B076A108EFF5fa7282a1B9aD2"],
+  NVDA: ["0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC", 18, "0x379EC4f7C378F34a1B47E4F3cbeBCbAC3E8E9F15"],
+  TSLA: ["0x322F0929c4625eD5bAd873c95208D54E1c003b2d", 18, "0x4A1166a659A55625345e9515b32adECea5547C38"],
+  QQQ: ["0xD5f3879160bc7c32ebb4dC785F8a4F505888de68", 18, "0x80901d846d5D7B030F26B480776EE3b29374C2ae"],
+  WETH: ["0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", 18, "0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9"],
 };
 const ASSETS = [
   { sym: "NVDA", name: "Nvidia", kind: "stock", cg: "nvidia-robinhood-tokenized-stock" },
@@ -174,7 +176,7 @@ async function shield(threshold = 5) {
   };
 }
 
-// ---------- Robinhood Chain testnet (raw JSON-RPC) ----------
+// ---------- Robinhood Chain mainnet (raw JSON-RPC) ----------
 const word = (addr) => addr.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 async function call(to, data) {
   let r;
@@ -188,23 +190,28 @@ const big = (hex, i = 0) => BigInt("0x" + (hex.replace(/^0x/, "").slice(i * 64, 
 const units = (v, dec) => Number(v) / 10 ** dec;
 async function wallet(addr) {
   if (!/^0x[0-9a-fA-F]{40}$/.test(addr || "")) throw new Error("Give a wallet address: bcio wallet 0x…");
-  const rows = [];
-  for (const [sym, [tok, dec]] of Object.entries(TOKENS)) {
-    const [bal, px] = await Promise.all([call(tok, "0x70a08231" + word(addr)), call(DESK, "0xe16043cc" + word(tok))]);
-    const amount = units(big(bal), dec), price = units(big(px), 8);
-    rows.push({ symbol: "t" + sym, amount, price, value_usd: amount * price });
-  }
+  const rows = await Promise.all(Object.entries(TOKENS).map(async ([sym, [tok, dec, feed]]) => {
+    const [bal, round] = await Promise.all([call(tok, "0x70a08231" + word(addr)), call(feed, "0xfeaf968c")]);
+    const amount = units(big(bal), dec), price = units(big(round, 1), 8);
+    return { symbol: sym, amount, price, value_usd: amount * price };
+  }));
   const total = rows.reduce((s, r) => s + r.value_usd, 0);
   rows.forEach((r) => { r.weight_pct = total ? (r.value_usd / total) * 100 : 0; });
-  const pol = await call(DESK, "0x187a7b8f" + word(addr) + word(KEEPER));
-  const expiry = Number(big(pol, 2)), now = Date.now() / 1000;
+  // BCIO agent contract + agent address come from the live site, so this never goes stale
+  let cfg = {};
+  try { cfg = await (await fetch(`${BCIO_API}/api/chain`)).json(); } catch { /* site unreachable: skip the permission */ }
+  let agent_permission = { active: false, note: "BCIO agent contract not deployed yet" };
+  if (cfg.agentContract && cfg.agent) {
+    const pol = await call(cfg.agentContract, "0x187a7b8f" + word(addr) + word(cfg.agent));
+    const expiry = Number(big(pol, 2)), now = Date.now() / 1000, today = Math.floor(now / 86400);
+    agent_permission = expiry > now
+      ? { active: true, contract: cfg.agentContract, agent: cfg.agent, max_trade_usd: units(big(pol, 0), 6), max_day_usd: units(big(pol, 1), 6), max_deviation_pct: Number(big(pol, 4)) / 100, spent_today_usd: Number(big(pol, 3)) === today ? units(big(pol, 5), 6) : 0, expires: new Date(expiry * 1000).toISOString() }
+      : { active: false, contract: cfg.agentContract, agent: cfg.agent };
+  }
   return {
-    network: "Robinhood Chain testnet (46630)", address: addr, desk: DESK, total_usd: total, positions: rows,
-    agent_permission: expiry > now
-      ? { active: true, agent: KEEPER, max_trade_usd: units(big(pol, 0), 8), max_day_usd: units(big(pol, 1), 8), spent_today_usd: units(big(pol, 4), 8), expires: new Date(expiry * 1000).toISOString() }
-      : { active: false, agent: KEEPER },
+    network: "Robinhood Chain mainnet (4663)", address: addr, total_usd: total, positions: rows, agent_permission,
     explorer: `${EXPLORER}/address/${addr}`,
-    note: "Test tokens on the BCIO testnet desk, valued at the desk oracle (live market prices).",
+    note: "Real tokens on Robinhood Chain, valued at Chainlink prices. Stock tokens are not shares.",
   };
 }
 
@@ -253,9 +260,9 @@ async function shieldCmd(t = 5) {
 }
 async function walletCmd(addr) {
   const w = await wallet(addr);
-  head(`wallet on the testnet desk · ${addr.slice(0, 6)}…${addr.slice(-4)}`);
+  head(`wallet on Robinhood Chain · ${addr.slice(0, 6)}…${addr.slice(-4)}`);
   for (const p of w.positions.filter((x) => x.amount > 0)) out(`  ${pad(bold(p.symbol), 8)}${pad(p.amount.toLocaleString("en-US", { maximumFractionDigits: 4 }), 16, true)}  ${pad(money(p.value_usd), 12, true)}  ${dim(p.weight_pct.toFixed(1) + "%")}`);
-  if (!w.positions.some((x) => x.amount > 0)) out(dim("  no BCIO test tokens yet: open the terminal and use the tUSDC faucet"));
+  if (!w.positions.some((x) => x.amount > 0)) out(dim("  no USDG, stock tokens or WETH on Robinhood Chain in this wallet"));
   out(`  ${pad(dim("total"), 8)}${pad("", 16)}  ${pad(bold(money(w.total_usd)), 12, true)}`);
   out();
   const a = w.agent_permission;
@@ -268,10 +275,10 @@ function help() {
   out(`  ${bold("bcio corr")} ${dim("<A> <B> [days]")}   correlation and lag of hourly returns (default NVDA BTC 7)`);
   out(`  ${bold("bcio matrix")} ${dim("[days]")}         correlation matrix of all nine`);
   out(`  ${bold("bcio shield")} ${dim("[pct]")}          weekend shield check: crypto moving while Wall Street is closed`);
-  out(`  ${bold("bcio wallet")} ${dim("<0x…>")}          a wallet on the BCIO testnet desk + the agent's on-chain limits`);
+  out(`  ${bold("bcio wallet")} ${dim("<0x…>")}          a wallet on Robinhood Chain + the agent's on-chain limits`);
   out(`  ${bold("bcio mcp")}                   MCP server (stdio) with these tools, for Claude and other clients`); out();
   out(dim("  Read-only: no keys, no signing. Data: CoinGecko public API (COINGECKO_API_KEY optional)."));
-  out(dim(`  Chain: Robinhood Chain testnet (BCIO_RPC to override). ${SITE}`)); out();
+  out(dim(`  Chain: Robinhood Chain mainnet (BCIO_RPC to override). ${SITE}`)); out();
 }
 
 // ---------- MCP server (stdio, newline-delimited JSON-RPC 2.0) ----------
@@ -281,7 +288,7 @@ const TOOLS = [
   { name: "correlate", description: "Correlation of hourly log returns between two assets, plus the lag (hours) at which they line up best. Use it to ask whether one asset leads another, e.g. does BTC follow NVDA.", inputSchema: { type: "object", properties: { a: { type: "string", enum: SYMS }, b: { type: "string", enum: SYMS }, days: { type: "number", minimum: 2, maximum: 30, default: 7 } }, required: ["a", "b"] }, run: async (x) => correlate(x.a, x.b, x.days ?? 7) },
   { name: "correlation_matrix", description: "Same-hour correlation matrix of hourly returns for all nine assets. Slow without COINGECKO_API_KEY (about 25 s).", inputSchema: { type: "object", properties: { days: { type: "number", minimum: 2, maximum: 30, default: 7 } } }, run: async (x) => matrix(x.days ?? 7) },
   { name: "weekend_shield", description: "Checks whether crypto (BTC, ETH, SOL) moved past a threshold in 24h while Wall Street is closed, and lists the stock tokens that can follow.", inputSchema: { type: "object", properties: { threshold_pct: { type: "number", minimum: 0.5, maximum: 50, default: 5 } } }, run: async (x) => shield(x.threshold_pct ?? 5) },
-  { name: "get_wallet", description: "Test-token positions of a wallet on the BCIO desk on Robinhood Chain testnet, valued at the desk oracle, plus the agent's on-chain trading limits for that wallet.", inputSchema: { type: "object", properties: { address: { type: "string", pattern: "^0x[0-9a-fA-F]{40}$" } }, required: ["address"] }, run: async (x) => wallet(x.address) },
+  { name: "get_wallet", description: "Positions of a wallet on Robinhood Chain mainnet (USDG, NVDA, TSLA, QQQ stock tokens, WETH) valued at Chainlink prices, plus the BCIO agent's on-chain trading limits for that wallet.", inputSchema: { type: "object", properties: { address: { type: "string", pattern: "^0x[0-9a-fA-F]{40}$" } }, required: ["address"] }, run: async (x) => wallet(x.address) },
 ];
 function mcp() {
   const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");
@@ -308,7 +315,7 @@ function mcp() {
         protocolVersion: params.protocolVersion || "2025-06-18",
         capabilities: { tools: {} },
         serverInfo: { name: "bcio", version: VERSION },
-        instructions: "BCIO reads Robinhood stock tokens and crypto together. Read-only market data (CoinGecko) and Robinhood Chain testnet reads; it never signs or trades. Correlations describe the past, not the future.",
+        instructions: "BCIO reads Robinhood stock tokens and crypto together. Read-only market data (CoinGecko) and Robinhood Chain mainnet reads; it never signs or trades. Correlations describe the past, not the future.",
       });
     }
     if (method === "ping") return reply(id, {});
