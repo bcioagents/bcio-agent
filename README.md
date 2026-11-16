@@ -7,6 +7,8 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/bcio-agent"><img src="https://img.shields.io/npm/v/bcio-agent?color=c98a1e&label=npm" alt="npm"></a>
   <a href="https://github.com/bcioagents/bcio-agent"><img src="https://img.shields.io/badge/github-bcio--agent-23260f?logo=github" alt="GitHub"></a>
+  <a href="https://x.com/bcioagents"><img src="https://img.shields.io/badge/X-%40bcioagents-23260f?logo=x" alt="X @bcioagents"></a>
+  <a href="https://bcio.trade"><img src="https://img.shields.io/badge/site-bcio.trade-c98a1e" alt="bcio.trade"></a>
   <a href="#mcp-server"><img src="https://img.shields.io/badge/MCP-server-e2c58e" alt="MCP server"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b8b96" alt="MIT"></a>
 </p>
